@@ -5,11 +5,21 @@ import wrtc from "@roamhq/wrtc";
 
 const PORT = process.env.PORT || 8080;
 const { nonstandard } = wrtc;
+
+// === Create WebRTC video source ===
 const videoSource = new nonstandard.RTCVideoSource();
+
+// === Prime the source with a dummy 640×480 black frame ===
+const WIDTH = 640;
+const HEIGHT = 480;
+const blackFrame = Buffer.alloc(WIDTH * HEIGHT * 3, 0); // RGB black
+videoSource.onFrame({ width: WIDTH, height: HEIGHT, data: blackFrame });
+console.log("🟩 Primed video source with 640x480 black frame");
 
 let viewerCount = 0;
 let frameCount = 0;
 
+// === HTTP server for status ===
 const server = http.createServer((req, res) => {
   if (req.url === "/status") {
     res.writeHead(200, { "Content-Type": "text/plain" });
@@ -20,7 +30,7 @@ const server = http.createServer((req, res) => {
   }
 });
 
-// === Upload WebSocket (ESP32 sends JPEG frames) ===
+// === WebSocket: ESP32 Upload ===
 const wssUpload = new WebSocketServer({ noServer: true });
 wssUpload.on("connection", (ws) => {
   console.log("[upload] ESP32 connected");
@@ -28,41 +38,34 @@ wssUpload.on("connection", (ws) => {
   ws.on("message", (data) => {
     try {
       const buf = Buffer.from(data);
+      if (buf.length < 200) return; // skip small/empty payloads
 
-      // Ignore empty or tiny frames
-      if (buf.length < 100) {
-        console.warn("⚠️ Dropped small payload:", buf.length);
-        return;
-      }
-
-      // Decode JPEG
+      // Decode JPEG from ESP32
       const decoded = jpeg.decode(buf, { useTArray: true });
       if (!decoded || !decoded.width || !decoded.height) {
         console.warn("⚠️ Invalid JPEG skipped");
         return;
       }
 
-      // Convert RGBA → RGB (remove alpha)
+      // Convert RGBA → RGB (strip alpha)
       const rgba = decoded.data;
       const rgb = Buffer.alloc(decoded.width * decoded.height * 3);
       for (let i = 0, j = 0; i < rgba.length; i += 4, j += 3) {
-        rgb[j] = rgba[i];       // R
-        rgb[j + 1] = rgba[i+1]; // G
-        rgb[j + 2] = rgba[i+2]; // B
+        rgb[j] = rgba[i];
+        rgb[j + 1] = rgba[i + 1];
+        rgb[j + 2] = rgba[i + 2];
       }
 
-      // Force correct VGA resolution (640×480)
+      // Feed decoded RGB frame into WebRTC source
       videoSource.onFrame({
-        width: 640,
-        height: 480,
+        width: WIDTH,
+        height: HEIGHT,
         data: rgb,
       });
 
       frameCount++;
       if (frameCount % 5 === 0) {
-        console.log(
-          `📸 Frame OK: 640x480 (${buf.length} bytes)`
-        );
+        console.log(`📸 Frame OK: ${WIDTH}x${HEIGHT} (${buf.length} bytes)`);
       }
     } catch (err) {
       console.error("❌ Decode error:", err.message);
@@ -72,7 +75,7 @@ wssUpload.on("connection", (ws) => {
   ws.on("close", () => console.log("[upload] ESP32 disconnected"));
 });
 
-// === Viewer WebRTC signaling ===
+// === WebSocket: Viewer Signaling ===
 const wssSignal = new WebSocketServer({ noServer: true });
 wssSignal.on("connection", (ws) => {
   console.log("[signal] viewer connected");
@@ -81,6 +84,7 @@ wssSignal.on("connection", (ws) => {
   const pc = new wrtc.RTCPeerConnection({
     iceServers: [{ urls: ["stun:stun.l.google.com:19302"] }],
   });
+
   const track = videoSource.createTrack();
   pc.addTrack(track);
 
@@ -114,7 +118,7 @@ wssSignal.on("connection", (ws) => {
   });
 });
 
-// === Upgrade HTTP → WebSocket ===
+// === Upgrade HTTP → WS ===
 server.on("upgrade", (req, socket, head) => {
   if (req.url === "/upload") {
     wssUpload.handleUpgrade(req, socket, head, (ws) =>
@@ -129,6 +133,7 @@ server.on("upgrade", (req, socket, head) => {
   }
 });
 
+// === Start server ===
 server.listen(PORT, () =>
   console.log(`🚀 SHELL bridge running on port ${PORT}`)
 );
