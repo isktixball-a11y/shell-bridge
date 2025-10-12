@@ -6,8 +6,8 @@
     "start": "node server.js"
   },
   "dependencies": {
-    "@roamhq/wrtc": "^0.9.0",
     "jpeg-js": "^0.4.4",
-    "ws": "^8.18.3"
+    "@roamhq/wrtc": "^0.9.0",
+    "ws": "^8.14.2"
   }
 }
