@@ -1,31 +1,95 @@
 <!doctype html>
 <html>
-<head><meta charset="utf-8"><title>SHELL Live</title></head>
-<body>
-  <video id="v" autoplay playsinline style="width:100%;max-width:720px;background:#000"></video>
-  <script>
-    const WS_SIGNAL_URL = "wss://shell-bridge.onrender.com/signal";
-    const pc = new RTCPeerConnection({iceServers:[{urls:'stun:stun.l.google.com:19302'}]});
-    const ws = new WebSocket(WS_SIGNAL_URL);
-    const video = document.getElementById('v');
+  <head>
+    <meta charset="utf-8" />
+    <title>SHELL Live View</title>
+    <style>
+      body {
+        background: #111;
+        color: #eee;
+        font-family: Arial, sans-serif;
+        text-align: center;
+        margin: 0;
+        padding: 0;
+      }
+      video, img {
+        width: 100%;
+        max-width: 720px;
+        background: #000;
+        border: 3px solid #444;
+        border-radius: 10px;
+        margin-top: 20px;
+      }
+      .status {
+        margin-top: 10px;
+        font-size: 14px;
+        color: #0f0;
+      }
+    </style>
+  </head>
+  <body>
+    <h2>SHELL Incubator Camera</h2>
 
-    pc.ontrack = e => video.srcObject = e.streams[0];
+    <!-- Switch between <video> and <img> -->
+    <video id="video" autoplay playsinline muted></video>
+    <img id="snapshot" style="display:none" />
 
-    ws.onopen = async () => {
-      const offer = await pc.createOffer();
-      await pc.setLocalDescription(offer);
-      ws.send(JSON.stringify({ offer }));
-    };
+    <p class="status" id="status">Connecting...</p>
 
-    ws.onmessage = async (ev) => {
-      const msg = JSON.parse(ev.data);
-      if (msg.answer) await pc.setRemoteDescription(new RTCSessionDescription(msg.answer));
-      else if (msg.candidate) await pc.addIceCandidate(msg.candidate);
-    };
+    <script>
+      // ---- MODE SWITCH ----
+      const USE_FIREBASE = false; // set to true if using Firebase snapshots
 
-    pc.onicecandidate = ev => {
-      if (ev.candidate) ws.send(JSON.stringify({ candidate: ev.candidate }));
-    };
-  </script>
-</body>
+      const video = document.getElementById('video');
+      const snapshot = document.getElementById('snapshot');
+      const statusEl = document.getElementById('status');
+
+      if (USE_FIREBASE) {
+        // === Snapshot Mode (Firebase) ===
+        const FIREBASE_URL =
+          "https://firebasestorage.googleapis.com/v0/b/YOUR_PROJECT_ID.appspot.com/o/latest.jpg?alt=media";
+
+        video.style.display = "none";
+        snapshot.style.display = "block";
+
+        async function refreshImage() {
+          snapshot.src = FIREBASE_URL + "&t=" + Date.now();
+          statusEl.textContent = "Latest snapshot loaded.";
+        }
+        refreshImage();
+        setInterval(refreshImage, 5000); // refresh every 5s
+      } else {
+        // === WebRTC Live Mode ===
+        const WS_SIGNAL_URL = "wss://shell-bridge.onrender.com/signal"; // change to Railway later
+        const pc = new RTCPeerConnection({
+          iceServers: [{ urls: "stun:stun.l.google.com:19302" }],
+        });
+        const ws = new WebSocket(WS_SIGNAL_URL);
+
+        pc.ontrack = (e) => {
+          video.srcObject = e.streams[0];
+          statusEl.textContent = "Live stream active.";
+        };
+
+        ws.onopen = async () => {
+          statusEl.textContent = "Connected to signal server...";
+          const offer = await pc.createOffer();
+          await pc.setLocalDescription(offer);
+          ws.send(JSON.stringify({ offer }));
+        };
+
+        ws.onmessage = async (ev) => {
+          const msg = JSON.parse(ev.data);
+          if (msg.answer)
+            await pc.setRemoteDescription(new RTCSessionDescription(msg.answer));
+          else if (msg.candidate)
+            await pc.addIceCandidate(msg.candidate);
+        };
+
+        pc.onicecandidate = (ev) => {
+          if (ev.candidate) ws.send(JSON.stringify({ candidate: ev.candidate }));
+        };
+      }
+    </script>
+  </body>
 </html>

@@ -1,13 +1,18 @@
 {
   "name": "shell-bridge",
   "version": "1.0.0",
+  "description": "WebRTC bridge server for ESP32 camera",
+  "main": "server.js",
   "type": "module",
   "scripts": {
     "start": "node server.js"
   },
   "dependencies": {
+    "ws": "^8.15.1",
     "jpeg-js": "^0.4.4",
-    "@roamhq/wrtc": "^0.9.0",
-    "ws": "^8.14.2"
+    "@roamhq/wrtc": "^0.9.0"
+  },
+  "engines": {
+    "node": "20.x"
   }
 }
