@@ -3,15 +3,14 @@ import { WebSocketServer } from "ws";
 import * as jpeg from "jpeg-js";
 import wrtc from "@roamhq/wrtc";
 
-const PORT = process.env.PORT || 10000;
+const PORT = process.env.PORT || 8080;
 const { nonstandard } = wrtc;
 const videoSource = new nonstandard.RTCVideoSource();
 
-let viewerCount = 0; // track if anyone is watching
+let viewerCount = 0; // track active viewers
 
 const server = http.createServer((req, res) => {
   if (req.url === "/status") {
-    // viewer status endpoint for ESP32
     res.writeHead(200, { "Content-Type": "text/plain" });
     res.end(viewerCount > 0 ? "VIEWER=1" : "VIEWER=0");
   } else {
@@ -20,26 +19,37 @@ const server = http.createServer((req, res) => {
   }
 });
 
-// --- Upload channel (ESP32 sends JPEG frames) ---
+// === Upload WebSocket (ESP32 sends JPEG frames) ===
 const wssUpload = new WebSocketServer({ noServer: true });
 wssUpload.on("connection", (ws) => {
   console.log("[upload] ESP32 connected");
+
   ws.on("message", (data) => {
     try {
-      const decoded = jpeg.decode(Buffer.from(data), { useTArray: true });
+      const buf = Buffer.from(data);
+      if (buf.length < 100) return; // drop short frames
+
+      const decoded = jpeg.decode(buf, { useTArray: true });
+      if (!decoded || !decoded.width || !decoded.height) {
+        console.warn("⚠️ Invalid frame skipped");
+        return;
+      }
+
+      // Feed frame into WebRTC source
       videoSource.onFrame({
-        width: decoded.width,
-        height: decoded.height,
+        width: decoded.width || 320,
+        height: decoded.height || 240,
         data: decoded.data,
       });
     } catch (err) {
       console.error("Decode error:", err.message);
     }
   });
+
   ws.on("close", () => console.log("[upload] ESP32 disconnected"));
 });
 
-// --- Viewer WebRTC signaling ---
+// === Viewer WebRTC signaling ===
 const wssSignal = new WebSocketServer({ noServer: true });
 wssSignal.on("connection", (ws) => {
   console.log("[signal] viewer connected");
@@ -61,10 +71,14 @@ wssSignal.on("connection", (ws) => {
       const answer = await pc.createAnswer();
       await pc.setLocalDescription(answer);
       ws.send(JSON.stringify({ answer }));
+      console.log("📡 Answer sent to viewer");
     } else if (data.candidate) {
       await pc.addIceCandidate(data.candidate);
     }
   });
+
+  pc.onconnectionstatechange = () =>
+    console.log(`RTC → ${pc.connectionState}`);
 
   ws.on("close", () => {
     try {
