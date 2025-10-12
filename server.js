@@ -6,20 +6,11 @@ import wrtc from "@roamhq/wrtc";
 const PORT = process.env.PORT || 8080;
 const { nonstandard } = wrtc;
 
-// === Create WebRTC video source ===
-const videoSource = new nonstandard.RTCVideoSource();
-
-// === Prime the source with a dummy 640×480 black frame ===
-const WIDTH = 640;
-const HEIGHT = 480;
-const blackFrame = Buffer.alloc(WIDTH * HEIGHT * 3, 0); // RGB black
-videoSource.onFrame({ width: WIDTH, height: HEIGHT, data: blackFrame });
-console.log("🟩 Primed video source with 640x480 black frame");
-
+let videoSource = null; // create later, once resolution is known
 let viewerCount = 0;
 let frameCount = 0;
 
-// === HTTP server for status ===
+// === HTTP STATUS ===
 const server = http.createServer((req, res) => {
   if (req.url === "/status") {
     res.writeHead(200, { "Content-Type": "text/plain" });
@@ -30,7 +21,7 @@ const server = http.createServer((req, res) => {
   }
 });
 
-// === WebSocket: ESP32 Upload ===
+// === Upload WS (ESP32) ===
 const wssUpload = new WebSocketServer({ noServer: true });
 wssUpload.on("connection", (ws) => {
   console.log("[upload] ESP32 connected");
@@ -38,16 +29,23 @@ wssUpload.on("connection", (ws) => {
   ws.on("message", (data) => {
     try {
       const buf = Buffer.from(data);
-      if (buf.length < 200) return; // skip small/empty payloads
+      if (buf.length < 200) return;
 
-      // Decode JPEG from ESP32
       const decoded = jpeg.decode(buf, { useTArray: true });
       if (!decoded || !decoded.width || !decoded.height) {
         console.warn("⚠️ Invalid JPEG skipped");
         return;
       }
 
-      // Convert RGBA → RGB (strip alpha)
+      // Initialize videoSource lazily on first frame
+      if (!videoSource) {
+        videoSource = new nonstandard.RTCVideoSource();
+        console.log(
+          `🟩 Initialized RTCVideoSource for ${decoded.width}x${decoded.height}`
+        );
+      }
+
+      // Convert RGBA → RGB
       const rgba = decoded.data;
       const rgb = Buffer.alloc(decoded.width * decoded.height * 3);
       for (let i = 0, j = 0; i < rgba.length; i += 4, j += 3) {
@@ -56,17 +54,17 @@ wssUpload.on("connection", (ws) => {
         rgb[j + 2] = rgba[i + 2];
       }
 
-      // Feed decoded RGB frame into WebRTC source
+      // Send frame to WebRTC
       videoSource.onFrame({
-        width: WIDTH,
-        height: HEIGHT,
+        width: decoded.width,
+        height: decoded.height,
         data: rgb,
       });
 
       frameCount++;
-      if (frameCount % 5 === 0) {
-        console.log(`📸 Frame OK: ${WIDTH}x${HEIGHT} (${buf.length} bytes)`);
-      }
+      if (frameCount % 5 === 0)
+        console.log(`📸 Frame OK: ${decoded.width}x${decoded.height} (${buf.length} bytes)`);
+
     } catch (err) {
       console.error("❌ Decode error:", err.message);
     }
@@ -75,7 +73,7 @@ wssUpload.on("connection", (ws) => {
   ws.on("close", () => console.log("[upload] ESP32 disconnected"));
 });
 
-// === WebSocket: Viewer Signaling ===
+// === Viewer WS (WebRTC) ===
 const wssSignal = new WebSocketServer({ noServer: true });
 wssSignal.on("connection", (ws) => {
   console.log("[signal] viewer connected");
@@ -85,8 +83,17 @@ wssSignal.on("connection", (ws) => {
     iceServers: [{ urls: ["stun:stun.l.google.com:19302"] }],
   });
 
-  const track = videoSource.createTrack();
-  pc.addTrack(track);
+  // Add track dynamically when videoSource is ready
+  let track = null;
+  const tryAddTrack = () => {
+    if (videoSource && !track) {
+      track = videoSource.createTrack();
+      pc.addTrack(track);
+      console.log("🎬 Added live track to viewer");
+    }
+  };
+  tryAddTrack();
+  const interval = setInterval(tryAddTrack, 1000); // re-check until ready
 
   pc.onicecandidate = ({ candidate }) => {
     if (candidate) ws.send(JSON.stringify({ candidate }));
@@ -109,9 +116,8 @@ wssSignal.on("connection", (ws) => {
     console.log(`🔄 RTC → ${pc.connectionState}`);
 
   ws.on("close", () => {
-    try {
-      track.stop();
-    } catch {}
+    clearInterval(interval);
+    try { track?.stop(); } catch {}
     pc.close();
     viewerCount--;
     console.log("[signal] viewer disconnected");
@@ -133,7 +139,6 @@ server.on("upgrade", (req, socket, head) => {
   }
 });
 
-// === Start server ===
 server.listen(PORT, () =>
   console.log(`🚀 SHELL bridge running on port ${PORT}`)
 );
