@@ -1,0 +1,31 @@
+<!doctype html>
+<html>
+<head><meta charset="utf-8"><title>SHELL Live</title></head>
+<body>
+  <video id="v" autoplay playsinline style="width:100%;max-width:720px;background:#000"></video>
+  <script>
+    const WS_SIGNAL_URL = "wss://shell-bridge.onrender.com/signal";
+    const pc = new RTCPeerConnection({iceServers:[{urls:'stun:stun.l.google.com:19302'}]});
+    const ws = new WebSocket(WS_SIGNAL_URL);
+    const video = document.getElementById('v');
+
+    pc.ontrack = e => video.srcObject = e.streams[0];
+
+    ws.onopen = async () => {
+      const offer = await pc.createOffer();
+      await pc.setLocalDescription(offer);
+      ws.send(JSON.stringify({ offer }));
+    };
+
+    ws.onmessage = async (ev) => {
+      const msg = JSON.parse(ev.data);
+      if (msg.answer) await pc.setRemoteDescription(new RTCSessionDescription(msg.answer));
+      else if (msg.candidate) await pc.addIceCandidate(msg.candidate);
+    };
+
+    pc.onicecandidate = ev => {
+      if (ev.candidate) ws.send(JSON.stringify({ candidate: ev.candidate }));
+    };
+  </script>
+</body>
+</html>
