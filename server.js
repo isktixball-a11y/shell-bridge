@@ -29,7 +29,7 @@ wssUpload.on("connection", (ws) => {
     try {
       const buf = Buffer.from(data);
 
-      // Drop tiny or invalid data
+      // Ignore empty or tiny frames
       if (buf.length < 100) {
         console.warn("⚠️ Dropped small payload:", buf.length);
         return;
@@ -42,7 +42,7 @@ wssUpload.on("connection", (ws) => {
         return;
       }
 
-      // Convert RGBA → RGB (remove alpha channel)
+      // Convert RGBA → RGB (remove alpha)
       const rgba = decoded.data;
       const rgb = Buffer.alloc(decoded.width * decoded.height * 3);
       for (let i = 0, j = 0; i < rgba.length; i += 4, j += 3) {
@@ -51,17 +51,17 @@ wssUpload.on("connection", (ws) => {
         rgb[j + 2] = rgba[i+2]; // B
       }
 
+      // Force correct VGA resolution (640×480)
       videoSource.onFrame({
-        width: decoded.width,
-        height: decoded.height,
+        width: 640,
+        height: 480,
         data: rgb,
       });
-
 
       frameCount++;
       if (frameCount % 5 === 0) {
         console.log(
-          `📸 Frame OK: ${decoded.width}x${decoded.height} (${buf.length} bytes)`
+          `📸 Frame OK: 640x480 (${buf.length} bytes)`
         );
       }
     } catch (err) {
@@ -69,9 +69,7 @@ wssUpload.on("connection", (ws) => {
     }
   });
 
-  ws.on("close", () => {
-    console.log("[upload] ESP32 disconnected");
-  });
+  ws.on("close", () => console.log("[upload] ESP32 disconnected"));
 });
 
 // === Viewer WebRTC signaling ===
@@ -83,7 +81,6 @@ wssSignal.on("connection", (ws) => {
   const pc = new wrtc.RTCPeerConnection({
     iceServers: [{ urls: ["stun:stun.l.google.com:19302"] }],
   });
-
   const track = videoSource.createTrack();
   pc.addTrack(track);
 
@@ -117,6 +114,7 @@ wssSignal.on("connection", (ws) => {
   });
 });
 
+// === Upgrade HTTP → WebSocket ===
 server.on("upgrade", (req, socket, head) => {
   if (req.url === "/upload") {
     wssUpload.handleUpgrade(req, socket, head, (ws) =>
