@@ -42,12 +42,21 @@ wssUpload.on("connection", (ws) => {
         return;
       }
 
-      // Push frame to WebRTC
+      // Convert RGBA → RGB (remove alpha channel)
+      const rgba = decoded.data;
+      const rgb = Buffer.alloc(decoded.width * decoded.height * 3);
+      for (let i = 0, j = 0; i < rgba.length; i += 4, j += 3) {
+        rgb[j] = rgba[i];       // R
+        rgb[j + 1] = rgba[i+1]; // G
+        rgb[j + 2] = rgba[i+2]; // B
+      }
+
       videoSource.onFrame({
         width: decoded.width,
         height: decoded.height,
-        data: decoded.data,
+        data: rgb,
       });
+
 
       frameCount++;
       if (frameCount % 5 === 0) {
