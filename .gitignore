@@ -1,0 +1,14 @@
+# Node modules
+node_modules/
+
+# Logs
+npm-debug.log*
+
+# OS files
+.DS_Store
+
+# VSCode
+.vscode/
+
+# env
+.env
