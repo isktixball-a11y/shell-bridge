@@ -7,14 +7,15 @@ const PORT = process.env.PORT || 8080;
 const { nonstandard } = wrtc;
 const videoSource = new nonstandard.RTCVideoSource();
 
-let viewerCount = 0; // track active viewers
+let viewerCount = 0;
+let frameCount = 0;
 
 const server = http.createServer((req, res) => {
   if (req.url === "/status") {
     res.writeHead(200, { "Content-Type": "text/plain" });
     res.end(viewerCount > 0 ? "VIEWER=1" : "VIEWER=0");
   } else {
-    res.writeHead(200);
+    res.writeHead(200, { "Content-Type": "text/plain" });
     res.end("OK");
   }
 });
@@ -27,26 +28,41 @@ wssUpload.on("connection", (ws) => {
   ws.on("message", (data) => {
     try {
       const buf = Buffer.from(data);
-      if (buf.length < 100) return; // drop short frames
 
-      const decoded = jpeg.decode(buf, { useTArray: true });
-      if (!decoded || !decoded.width || !decoded.height) {
-        console.warn("⚠️ Invalid frame skipped");
+      // Drop tiny or invalid data
+      if (buf.length < 100) {
+        console.warn("⚠️ Dropped small payload:", buf.length);
         return;
       }
 
-      // Feed frame into WebRTC source
+      // Decode JPEG
+      const decoded = jpeg.decode(buf, { useTArray: true });
+      if (!decoded || !decoded.width || !decoded.height) {
+        console.warn("⚠️ Invalid JPEG skipped");
+        return;
+      }
+
+      // Push frame to WebRTC
       videoSource.onFrame({
-        width: decoded.width || 320,
-        height: decoded.height || 240,
+        width: decoded.width,
+        height: decoded.height,
         data: decoded.data,
       });
+
+      frameCount++;
+      if (frameCount % 5 === 0) {
+        console.log(
+          `📸 Frame OK: ${decoded.width}x${decoded.height} (${buf.length} bytes)`
+        );
+      }
     } catch (err) {
-      console.error("Decode error:", err.message);
+      console.error("❌ Decode error:", err.message);
     }
   });
 
-  ws.on("close", () => console.log("[upload] ESP32 disconnected"));
+  ws.on("close", () => {
+    console.log("[upload] ESP32 disconnected");
+  });
 });
 
 // === Viewer WebRTC signaling ===
@@ -58,8 +74,10 @@ wssSignal.on("connection", (ws) => {
   const pc = new wrtc.RTCPeerConnection({
     iceServers: [{ urls: ["stun:stun.l.google.com:19302"] }],
   });
+
   const track = videoSource.createTrack();
   pc.addTrack(track);
+
   pc.onicecandidate = ({ candidate }) => {
     if (candidate) ws.send(JSON.stringify({ candidate }));
   };
@@ -78,7 +96,7 @@ wssSignal.on("connection", (ws) => {
   });
 
   pc.onconnectionstatechange = () =>
-    console.log(`RTC → ${pc.connectionState}`);
+    console.log(`🔄 RTC → ${pc.connectionState}`);
 
   ws.on("close", () => {
     try {
@@ -104,4 +122,6 @@ server.on("upgrade", (req, socket, head) => {
   }
 });
 
-server.listen(PORT, () => console.log("bridge up on :" + PORT));
+server.listen(PORT, () =>
+  console.log(`🚀 SHELL bridge running on port ${PORT}`)
+);
