@@ -1,19 +1,17 @@
 {
   "name": "shell-bridge",
   "version": "1.0.0",
-  "description": "WebRTC bridge server for ESP32 camera",
-  "main": "server.js",
+  "description": "WebRTC bridge for ESP32-CAM streaming (SHELL Incubator)",
   "type": "module",
   "scripts": {
     "start": "node server.js"
   },
-  "dependencies": {
-  "jpeg-js": "0.4.4",
-  "wrtc": "0.4.7",
-  "ws": "8.17.1",
-  "node-pre-gyp": "^1.0.11"
-  },
   "engines": {
     "node": ">=20"
+  },
+  "dependencies": {
+    "jpeg-js": "0.4.4",
+    "ws": "8.17.1",
+    "wrtc": "0.4.7"
   }
 }
