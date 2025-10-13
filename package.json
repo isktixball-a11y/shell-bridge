@@ -8,9 +8,10 @@
     "start": "node server.js"
   },
   "dependencies": {
-    "jpeg-js": "^0.4.4",
-    "wrtc": "^0.4.7",
-    "ws": "^8.17.1"
+  "jpeg-js": "0.4.4",
+  "wrtc": "0.4.7",
+  "ws": "8.17.1",
+  "node-pre-gyp": "^1.0.11"
   },
   "engines": {
     "node": ">=20"
