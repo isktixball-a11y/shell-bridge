@@ -1,30 +1,41 @@
 <!doctype html>
 <html>
-<head><meta charset="utf-8"><title>📡 SHELL Incubator — Live Camera Feed</title></head>
-<body>
-  <h2>📡 SHELL Incubator — Live Camera Feed</h2>
-  <video id="v" autoplay playsinline style="width:100%;max-width:720px;background:#000"></video>
-  <p>📡 Waiting for video feed...</p>
-  <script>
-    const WS_SIGNAL_URL = "wss://shell-bridge.onrender.com/signal";
-    const pc = new RTCPeerConnection({iceServers:[{urls:'stun:stun.l.google.com:19302'}]});
-    const ws = new WebSocket(WS_SIGNAL_URL);
-    const video = document.getElementById('v');
-    pc.ontrack = e => video.srcObject = e.streams[0];
+  <head>
+    <meta charset="utf-8" />
+    <title>ESP32-CAM WebRTC Viewer</title>
+  </head>
+  <body>
+    <video id="video" autoplay playsinline controls muted></video>
+    <script>
+      const ws = new WebSocket(
+        (location.protocol === "https:" ? "wss://" : "ws://") + location.host + "/ws"
+      );
 
-    ws.onopen = async () => {
-      const offer = await pc.createOffer();
-      await pc.setLocalDescription(offer);
-      ws.send(JSON.stringify({ offer }));
-    };
-    ws.onmessage = async (ev) => {
-      const msg = JSON.parse(ev.data);
-      if (msg.answer) await pc.setRemoteDescription(new RTCSessionDescription(msg.answer));
-      else if (msg.candidate) await pc.addIceCandidate(msg.candidate);
-    };
-    pc.onicecandidate = ev => {
-      if (ev.candidate) ws.send(JSON.stringify({ candidate: ev.candidate }));
-    };
-  </script>
-</body>
+      let pc;
+      const iceServers = [{ urls: "stun:stun.l.google.com:19302" }];
+
+      ws.onmessage = async (event) => {
+        const msg = JSON.parse(event.data);
+
+        if (msg.type === "offer") {
+          pc = new RTCPeerConnection({ iceServers });
+          pc.ontrack = (ev) => (document.getElementById("video").srcObject = ev.streams[0]);
+          pc.onicecandidate = (e) => {
+            if (e.candidate) ws.send(JSON.stringify({ type: "candidate", candidate: e.candidate }));
+          };
+
+          await pc.setRemoteDescription(msg);
+          const answer = await pc.createAnswer();
+          await pc.setLocalDescription(answer);
+          ws.send(JSON.stringify(pc.localDescription));
+        } else if (msg.type === "candidate" && pc) {
+          try {
+            await pc.addIceCandidate(msg.candidate);
+          } catch (e) {
+            console.warn(e);
+          }
+        }
+      };
+    </script>
+  </body>
 </html>

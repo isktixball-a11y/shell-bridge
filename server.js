@@ -1,97 +1,36 @@
-import http from "http";
-import { WebSocketServer } from "ws";
-import * as jpeg from "jpeg-js";
-import wrtc from "@roamhq/wrtc";
+const express = require("express");
+const path = require("path");
+const http = require("http");
+const WebSocket = require("ws");
 
-const PORT = process.env.PORT || 10000;
-const { nonstandard } = wrtc;
-const videoSource = new nonstandard.RTCVideoSource();
+const app = express();
+const server = http.createServer(app);
+const wss = new WebSocket.Server({ server, path: "/ws" });
 
-let viewerCount = 0;
+app.use(express.static(path.join(__dirname)));
 
-const server = http.createServer((req, res) => {
-  if (req.url === "/status") {
-    res.writeHead(200, { "Content-Type": "text/plain" });
-    res.end(viewerCount > 0 ? "VIEWER=1" : "VIEWER=0");
-  } else {
-    res.writeHead(200);
-    res.end("📡 SHELL Bridge Ready");
-  }
-});
+wss.on("connection", (ws) => {
+  ws.isAlive = true;
+  ws.on("pong", () => (ws.isAlive = true));
 
-// === WebSocket Upload (ESP32 sends JPEGs) ===
-const wssUpload = new WebSocketServer({ noServer: true });
-wssUpload.on("connection", (ws) => {
-  console.log("[upload] ESP32 connected");
-
-  ws.on("message", (data) => {
-    try {
-      const decoded = jpeg.decode(Buffer.from(data), { useTArray: true });
-      videoSource.onFrame({
-        width: decoded.width,
-        height: decoded.height,
-        data: decoded.data,
-      });
-    } catch (err) {
-      console.error("Decode error:", err.message);
-    }
-  });
-
-  ws.on("close", () => console.log("[upload] ESP32 disconnected"));
-});
-
-// === WebSocket Signaling (Browser viewer) ===
-const wssSignal = new WebSocketServer({ noServer: true });
-wssSignal.on("connection", (ws) => {
-  console.log("[signal] viewer connected");
-  viewerCount++;
-
-  const pc = new wrtc.RTCPeerConnection({
-    iceServers: [{ urls: ["stun:stun.l.google.com:19302"] }],
-  });
-
-  const track = videoSource.createTrack();
-  pc.addTrack(track);
-
-  pc.onicecandidate = ({ candidate }) => {
-    if (candidate) ws.send(JSON.stringify({ candidate }));
-  };
-
-  ws.on("message", async (msg) => {
-    const data = JSON.parse(msg);
-    if (data.offer) {
-      await pc.setRemoteDescription(new wrtc.RTCSessionDescription(data.offer));
-      const answer = await pc.createAnswer();
-      await pc.setLocalDescription(answer);
-      ws.send(JSON.stringify({ answer }));
-      console.log("📡 Answer sent to viewer");
-    } else if (data.candidate) {
-      await pc.addIceCandidate(data.candidate);
-    }
-  });
-
-  ws.on("close", () => {
-    try {
-      track.stop();
-    } catch {}
-    pc.close();
-    viewerCount--;
-    console.log("[signal] viewer disconnected");
+  ws.on("message", (msg) => {
+    // Forward messages to all other clients
+    wss.clients.forEach((client) => {
+      if (client !== ws && client.readyState === WebSocket.OPEN) {
+        client.send(msg);
+      }
+    });
   });
 });
 
-server.on("upgrade", (req, socket, head) => {
-  if (req.url === "/upload") {
-    wssUpload.handleUpgrade(req, socket, head, (ws) =>
-      wssUpload.emit("connection", ws, req)
-    );
-  } else if (req.url === "/signal") {
-    wssSignal.handleUpgrade(req, socket, head, (ws) =>
-      wssSignal.emit("connection", ws, req)
-    );
-  } else {
-    socket.destroy();
-  }
-});
+// keep-alive ping every 30s
+setInterval(() => {
+  wss.clients.forEach((ws) => {
+    if (!ws.isAlive) return ws.terminate();
+    ws.isAlive = false;
+    ws.ping();
+  });
+}, 30000);
 
-server.listen(PORT, () => console.log(`🚀 SHELL bridge running on port ${PORT}`));
+const PORT = process.env.PORT || 3000;
+server.listen(PORT, () => console.log(`✅ Server running on port ${PORT}`));
