@@ -4,7 +4,8 @@
   "description": "WebRTC bridge for ESP32-CAM streaming (SHELL Incubator)",
   "type": "module",
   "scripts": {
-    "start": "node server.js"
+    "start": "node server.js",
+    "postinstall": "npm rebuild --unsafe-perm"
   },
   "engines": {
     "node": ">=20"
