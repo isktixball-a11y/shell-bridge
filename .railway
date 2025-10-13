@@ -1,0 +1,8 @@
+# Install node-pre-gyp globally first (for wrtc build)
+npm install -g node-pre-gyp
+
+# Then install all project dependencies normally
+npm ci
+
+# Finally rebuild permissions for native modules just to be safe
+npm rebuild --unsafe-perm
