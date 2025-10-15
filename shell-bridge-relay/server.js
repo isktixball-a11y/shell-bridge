@@ -35,10 +35,12 @@ const heartbeatInterval = setInterval(() => {
 
 wss.on("connection", (ws, req) => {
   ws.isAlive = true;
+  console.log(`🔗 New connection from ${req.socket.remoteAddress} - URL: ${req.url}`);
 
   // Pong handler - client responds to ping
   ws.on("pong", () => {
     ws.isAlive = true;
+    console.log("💓 Pong received");
   });
 
   // Error handler
@@ -47,6 +49,7 @@ wss.on("connection", (ws, req) => {
   });
 
   const isCamera = req.url.includes("camera");
+  console.log(`${isCamera ? "📷 CAMERA" : "👀 VIEWER"} connection attempt`);
   
   if (isCamera) {
     camera = ws;
