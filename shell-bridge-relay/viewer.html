@@ -1,0 +1,44 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>SHELL Live Viewer</title>
+    <style>
+      body { background:#000; margin:0; display:flex; align-items:center; justify-content:center; height:100vh; }
+      #info { position:fixed; top:10px; color:#0f0; font-family:monospace; }
+      canvas { max-width:95vw; max-height:95vh; background:#000; }
+    </style>
+  </head>
+  <body>
+    <div id="info">Connecting…</div>
+    <canvas id="c"></canvas>
+
+    <script>
+      const info = document.getElementById('info');
+      const canvas = document.getElementById('c');
+      const ctx = canvas.getContext('2d');
+      const img = new Image();
+
+      function connect() {
+        const ws = new WebSocket('wss://shell-bridge-relay.onrender.com/ws');
+        ws.binaryType = 'arraybuffer';
+        ws.onopen = () => info.textContent = '🟢 Connected';
+        ws.onclose = () => { info.textContent = '🔴 Disconnected – reconnecting…'; setTimeout(connect, 2000); };
+        ws.onerror = () => info.textContent = '⚠️ Error';
+        ws.onmessage = (e) => {
+          const blob = new Blob([e.data], { type: 'image/jpeg' });
+          img.src = URL.createObjectURL(blob);
+        };
+      }
+
+      img.onload = () => {
+        canvas.width = img.width;
+        canvas.height = img.height;
+        ctx.drawImage(img, 0, 0);
+        URL.revokeObjectURL(img.src);
+      };
+
+      connect();
+    </script>
+  </body>
+</html>
