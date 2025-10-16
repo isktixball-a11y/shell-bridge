@@ -12,16 +12,17 @@ const server = app.listen(PORT, () =>
   console.log(`shell-relay listening on ${PORT}`)
 );
 
-// Server keep-alive settings
+// Keep-alive
 server.keepAliveTimeout = 65000;
 server.headersTimeout = 66000;
 
 const wss = new WebSocketServer({ server, path: "/ws" });
 
+// Global connections
 let camera = null;
 const viewers = new Set();
 
-// Heartbeat interval to keep connections alive
+// Heartbeat every 30s
 const heartbeatInterval = setInterval(() => {
   wss.clients.forEach((ws) => {
     if (ws.isAlive === false) {
@@ -29,60 +30,72 @@ const heartbeatInterval = setInterval(() => {
       return ws.terminate();
     }
     ws.isAlive = false;
-    ws.ping(); // Send ping frame
+    ws.ping(); // send ping frame
   });
-}, 30000); // 30 second heartbeat
+}, 30000);
 
 wss.on("connection", (ws, req) => {
   ws.isAlive = true;
-  console.log(`🔗 New connection from ${req.socket.remoteAddress} - URL: ${req.url}`);
-
-  // Pong handler - client responds to ping
-  ws.on("pong", () => {
-    ws.isAlive = true;
-    console.log("💓 Pong received");
-  });
-
-  // Error handler
-  ws.on("error", (error) => {
-    console.error("❌ WebSocket error:", error.message);
-  });
-
+  const ip = req.socket.remoteAddress;
   const isCamera = req.url.includes("camera");
-  console.log(`${isCamera ? "📷 CAMERA" : "👀 VIEWER"} connection attempt`);
-  
+
+  console.log(`🔗 New connection from ${ip} - ${isCamera ? "📷 CAMERA" : "👀 VIEWER"}`);
+
+  // Handle pong responses
+  ws.on("pong", () => (ws.isAlive = true));
+
+  // Handle errors
+  ws.on("error", (err) => {
+    console.error("❌ WebSocket error:", err.message);
+  });
+
+  // ===== CAMERA CONNECTION =====
   if (isCamera) {
     camera = ws;
-    console.log("📷 Camera connected");
-    
+    console.log("📷 Camera connected ✅");
+
     ws.on("message", (data) => {
-      console.log(`📨 Received ${data.length} bytes from camera, broadcasting to ${viewers.size} viewers`);
-      try {
-        for (const v of viewers) {
-          if (v.readyState === 1) { // 1 = OPEN
-            v.send(data, (err) => {
-              if (err) console.error("Send error:", err.message);
-            });
-          }
+      console.log(`📨 Frame ${data.length} bytes → broadcasting to ${viewers.size} viewers`);
+      for (const v of viewers) {
+        if (v.readyState === 1) {
+          v.send(data, (err) => {
+            if (err) console.error("Send error:", err.message);
+          });
         }
-      } catch (err) {
-        console.error("Message broadcast error:", err.message);
       }
     });
 
     ws.on("close", () => {
       camera = null;
       console.log("❌ Camera disconnected");
+      // Notify all viewers camera is offline
+      for (const v of viewers) {
+        if (v.readyState === 1) v.send("CAMERA_OFF");
+      }
     });
-  } else {
-    viewers.add(ws);
-    console.log(`👀 Viewer joined (${viewers.size})`);
-    
-    ws.on("close", () => {
-      viewers.delete(ws);
-      console.log(`👋 Viewer left (${viewers.size})`);
-    });
+
+    return;
   }
+
+  // ===== VIEWER CONNECTION =====
+  viewers.add(ws);
+  console.log(`👀 Viewer joined (${viewers.size})`);
+
+  // Notify camera that a viewer is connected
+  if (camera && camera.readyState === 1) {
+    camera.send("VIEWER_ON");
+    console.log("📡 Sent VIEWER_ON to camera");
+  }
+
+  // Handle viewer disconnect
+  ws.on("close", () => {
+    viewers.delete(ws);
+    console.log(`👋 Viewer left (${viewers.size})`);
+    if (viewers.size === 0 && camera && camera.readyState === 1) {
+      camera.send("VIEWER_OFF");
+      console.log("📡 Sent VIEWER_OFF to camera");
+    }
+  });
 });
 
 // Cleanup on shutdown
