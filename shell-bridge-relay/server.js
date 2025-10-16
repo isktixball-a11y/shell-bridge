@@ -1,24 +1,16 @@
 import express from "express";
 import { WebSocketServer } from "ws";
-import path from "path";
-import { fileURLToPath } from "url";
-
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 const app = express();
 const PORT = process.env.PORT || 10000;
 
-// Serve static files
-app.use(express.static(__dirname));
+// Basic alive check
+app.get("/", (req, res) => res.send("SHELL Relay Active ✅"));
 
-// Fallback for index.html
-app.get("/", (req, res) => res.sendFile(path.join(__dirname, "index.html")));
-
+// HTTP server for WebSocket upgrade
 const server = app.listen(PORT, () =>
   console.log(`shell-relay listening on ${PORT}`)
 );
-
-// ... rest of WebSocket code stays the same
 
 // Server keep-alive settings
 server.keepAliveTimeout = 65000;
@@ -64,6 +56,7 @@ wss.on("connection", (ws, req) => {
     console.log("📷 Camera connected");
     
     ws.on("message", (data) => {
+      console.log(`📨 Received ${data.length} bytes from camera, broadcasting to ${viewers.size} viewers`);
       try {
         for (const v of viewers) {
           if (v.readyState === 1) { // 1 = OPEN
