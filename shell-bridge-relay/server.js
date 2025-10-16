@@ -1,16 +1,24 @@
 import express from "express";
 import { WebSocketServer } from "ws";
+import path from "path";
+import { fileURLToPath } from "url";
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 const app = express();
 const PORT = process.env.PORT || 10000;
 
-// Basic alive check
-app.get("/", (req, res) => res.send("SHELL Relay Active ✅"));
+// Serve static files
+app.use(express.static(__dirname));
 
-// HTTP server for WebSocket upgrade
+// Fallback for index.html
+app.get("/", (req, res) => res.sendFile(path.join(__dirname, "index.html")));
+
 const server = app.listen(PORT, () =>
   console.log(`shell-relay listening on ${PORT}`)
 );
+
+// ... rest of WebSocket code stays the same
 
 // Server keep-alive settings
 server.keepAliveTimeout = 65000;

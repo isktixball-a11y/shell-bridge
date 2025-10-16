@@ -1,0 +1,320 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SHELL Incubator - Live Camera</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 20px;
+        }
+
+        .container {
+            max-width: 900px;
+            width: 100%;
+            background: white;
+            border-radius: 12px;
+            box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+            overflow: hidden;
+        }
+
+        .header {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 20px;
+            text-align: center;
+        }
+
+        .header h1 {
+            font-size: 24px;
+            margin-bottom: 5px;
+        }
+
+        .status {
+            font-size: 12px;
+            opacity: 0.9;
+        }
+
+        .video-container {
+            position: relative;
+            width: 100%;
+            aspect-ratio: 4 / 3;
+            background: #000;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            overflow: hidden;
+        }
+
+        canvas {
+            width: 100%;
+            height: 100%;
+            object-fit: contain;
+        }
+
+        .loading {
+            position: absolute;
+            color: white;
+            font-size: 14px;
+            text-align: center;
+        }
+
+        .spinner {
+            border: 3px solid rgba(255, 255, 255, 0.3);
+            border-top: 3px solid white;
+            border-radius: 50%;
+            width: 40px;
+            height: 40px;
+            animation: spin 1s linear infinite;
+            margin: 0 auto 10px;
+        }
+
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+
+        .info {
+            padding: 20px;
+            background: #f5f5f5;
+            border-top: 1px solid #eee;
+        }
+
+        .info-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 15px;
+        }
+
+        .info-item {
+            padding: 10px;
+            background: white;
+            border-radius: 6px;
+            border-left: 3px solid #667eea;
+        }
+
+        .info-label {
+            font-size: 12px;
+            color: #666;
+            margin-bottom: 5px;
+        }
+
+        .info-value {
+            font-size: 16px;
+            font-weight: 600;
+            color: #333;
+        }
+
+        .status-indicator {
+            display: inline-block;
+            width: 10px;
+            height: 10px;
+            border-radius: 50%;
+            margin-right: 5px;
+            animation: pulse 2s infinite;
+        }
+
+        .status-indicator.connected {
+            background: #4caf50;
+        }
+
+        .status-indicator.disconnected {
+            background: #f44336;
+            animation: none;
+        }
+
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.5; }
+        }
+
+        .error-message {
+            padding: 20px;
+            background: #ffebee;
+            color: #c62828;
+            text-align: center;
+            border-top: 1px solid #eee;
+            display: none;
+        }
+
+        .error-message.show {
+            display: block;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>🐣 SHELL Incubator</h1>
+            <div class="status">
+                <span class="status-indicator disconnected" id="statusIndicator"></span>
+                <span id="statusText">Connecting...</span>
+            </div>
+        </div>
+
+        <div class="video-container">
+            <canvas id="videoCanvas"></canvas>
+            <div class="loading" id="loadingIndicator">
+                <div class="spinner"></div>
+                <div>Connecting to camera...</div>
+            </div>
+        </div>
+
+        <div class="info">
+            <div class="info-grid">
+                <div class="info-item">
+                    <div class="info-label">Frame Size</div>
+                    <div class="info-value" id="frameSize">-- bytes</div>
+                </div>
+                <div class="info-item">
+                    <div class="info-label">FPS</div>
+                    <div class="info-value" id="fps">-- fps</div>
+                </div>
+                <div class="info-item">
+                    <div class="info-label">Frames Received</div>
+                    <div class="info-value" id="frameCount">0</div>
+                </div>
+                <div class="info-item">
+                    <div class="info-label">Connection Time</div>
+                    <div class="info-value" id="uptime">0s</div>
+                </div>
+            </div>
+        </div>
+
+        <div class="error-message" id="errorMessage"></div>
+    </div>
+
+    <script>
+        const canvas = document.getElementById('videoCanvas');
+        const ctx = canvas.getContext('2d');
+        const loadingIndicator = document.getElementById('loadingIndicator');
+        const statusIndicator = document.getElementById('statusIndicator');
+        const statusText = document.getElementById('statusText');
+        const frameCountEl = document.getElementById('frameCount');
+        const frameSizeEl = document.getElementById('frameSize');
+        const fpsEl = document.getElementById('fps');
+        const uptimeEl = document.getElementById('uptime');
+        const errorMessage = document.getElementById('errorMessage');
+
+        let ws = null;
+        let frameCount = 0;
+        let lastFrameTime = Date.now();
+        let fps = 0;
+        let connectionTime = null;
+
+        function connect() {
+            try {
+                // Use wss:// for HTTPS, ws:// for HTTP
+                const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+                const wsUrl = `${protocol}//${window.location.host}/ws`;
+                
+                console.log('Connecting to:', wsUrl);
+                ws = new WebSocket(wsUrl);
+                ws.binaryType = 'arraybuffer';
+
+                ws.onopen = () => {
+                    console.log('WebSocket connected');
+                    statusIndicator.className = 'status-indicator connected';
+                    statusText.textContent = 'Connected ✅';
+                    loadingIndicator.style.display = 'none';
+                    errorMessage.classList.remove('show');
+                    connectionTime = Date.now();
+                };
+
+                ws.onmessage = (event) => {
+                    try {
+                        const data = new Uint8Array(event.data);
+                        
+                        // Convert JPEG bytes to blob and display
+                        const blob = new Blob([data], { type: 'image/jpeg' });
+                        const url = URL.createObjectURL(blob);
+                        
+                        const img = new Image();
+                        img.onload = () => {
+                            canvas.width = img.width;
+                            canvas.height = img.height;
+                            ctx.drawImage(img, 0, 0);
+                            URL.revokeObjectURL(url);
+                        };
+                        img.src = url;
+
+                        // Update stats
+                        frameCount++;
+                        frameCountEl.textContent = frameCount;
+                        frameSizeEl.textContent = (data.length / 1024).toFixed(2) + ' KB';
+
+                        // Calculate FPS
+                        const now = Date.now();
+                        const timeDiff = (now - lastFrameTime) / 1000;
+                        if (timeDiff > 0) {
+                            fps = (1 / timeDiff).toFixed(1);
+                            fpsEl.textContent = fps + ' fps';
+                        }
+                        lastFrameTime = now;
+
+                    } catch (error) {
+                        console.error('Error processing frame:', error);
+                    }
+                };
+
+                ws.onerror = (error) => {
+                    console.error('WebSocket error:', error);
+                    statusIndicator.className = 'status-indicator disconnected';
+                    statusText.textContent = 'Error ❌';
+                    showError('WebSocket error: ' + error);
+                };
+
+                ws.onclose = () => {
+                    console.log('WebSocket closed');
+                    statusIndicator.className = 'status-indicator disconnected';
+                    statusText.textContent = 'Disconnected ❌';
+                    loadingIndicator.style.display = 'flex';
+                    
+                    // Try reconnect in 3 seconds
+                    setTimeout(connect, 3000);
+                };
+
+            } catch (error) {
+                console.error('Connection error:', error);
+                showError('Failed to connect: ' + error.message);
+            }
+        }
+
+        function showError(message) {
+            errorMessage.textContent = '⚠️ ' + message;
+            errorMessage.classList.add('show');
+        }
+
+        function updateUptime() {
+            if (connectionTime) {
+                const elapsed = Math.floor((Date.now() - connectionTime) / 1000);
+                uptimeEl.textContent = elapsed + 's';
+            }
+        }
+
+        // Set canvas to default size
+        canvas.width = 320;
+        canvas.height = 240;
+        ctx.fillStyle = '#333';
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+        // Start connection
+        connect();
+
+        // Update uptime every second
+        setInterval(updateUptime, 1000);
+    </script>
+</body>
+</html>
